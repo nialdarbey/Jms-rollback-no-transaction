@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.4.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd">
+	<jms:activemq-connector name="Active_MQ" brokerURL="vm://localhost" validateConnections="true" doc:name="Active MQ" embeddedMode="true" maxRedelivery="10"/>
+	<flow name="listener" doc:name="listener">
+		<http:inbound-endpoint exchange-pattern="request-response" host="0.0.0.0" port="8081" doc:name="localhost:8081/">
+		</http:inbound-endpoint>
+		<object-to-string-transformer doc:name="Object to String"/>
+		<jms:outbound-endpoint  queue="#[message.inboundProperties.trans]" connector-ref="Active_MQ" doc:name="transactional | non-transactional"  />
+	</flow>
+
+	
+	<flow name="transactional" doc:name="transactional">
+		<jms:inbound-endpoint  queue="transactional" doc:name="transactional" connector-ref="Active_MQ">
+			<idempotent-redelivery-policy idExpression="#[message.inboundProperties.JMSMessageID]"/>
+            <jms:transaction action="ALWAYS_BEGIN"/>
+		</jms:inbound-endpoint>
+        <jms:outbound-endpoint doc:name="x" queue="x">
+            <jms:transaction action="ALWAYS_JOIN"/>
+        </jms:outbound-endpoint>
+        <jms:outbound-endpoint doc:name="y" queue="y">
+            <jms:transaction action="ALWAYS_JOIN"/>
+        </jms:outbound-endpoint>
+        <jms:outbound-endpoint doc:name="z" queue="z">
+            <jms:transaction action="ALWAYS_JOIN"/>
+        </jms:outbound-endpoint>
+		<choice doc:name="Choice">
+			<when expression="#[payload == 'ok']">
+				<processor-chain doc:name="payload = 'ok'">
+					<logger message="We are good" level="INFO" doc:name="We are good" />
+				</processor-chain>
+			</when>
+			<otherwise>
+                <scripting:component doc:name="Throw exception">
+                    <scripting:script engine="Groovy"><![CDATA[throw new RuntimeException('Sorry!');]]></scripting:script>
+                </scripting:component>
+			</otherwise>
+		</choice>
+		<rollback-exception-strategy doc:name="Rollback Exception Strategy" maxRedeliveryAttempts="1">
+			<logger message="rolling back" level="INFO" doc:name="Rolling back" />
+			<on-redelivery-attempts-exceeded doc:name="Redelivery exhausted">
+				<logger message="Redelivery exhausted" level="INFO" doc:name="Exhausted" />
+                <expression-component doc:name="Stop flow"><![CDATA[app.registry['transactional'].stop()]]></expression-component>
+			</on-redelivery-attempts-exceeded>
+		</rollback-exception-strategy>
+	</flow>
+
+</mule>
